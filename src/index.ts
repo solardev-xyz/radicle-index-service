@@ -49,26 +49,7 @@ async function cycle(): Promise<void> {
     `[discover] gossip knows ${gossip.length} repos; ${stored.size} stored locally`,
   );
 
-  // Expand the crawl.
   const state = await loadState(config.stateFile);
-  const candidates = gossip
-    .map((repo) => repo.rid)
-    .filter((rid) => !stored.has(rid));
-  const fetched = await fetchNewRepos(
-    config.radBin,
-    config.radHome,
-    candidates,
-    state,
-    {
-      limit: config.fetchPerCycle,
-      diskFloorGb: config.diskFloorGb,
-    },
-  );
-  await saveState(config.stateFile, state);
-  if (fetched.fetched.length) {
-    console.log(`[fetch] seeded ${fetched.fetched.length} new repos`);
-    for (const rid of await discoverStored(config.httpdUrl)) stored.add(rid);
-  }
 
   // Extract incrementally: only repos whose refs moved since last time
   // (per gossip announcements), everything else from the record cache.
@@ -173,6 +154,33 @@ async function cycle(): Promise<void> {
   if (ttl !== null && ttl < 30 * 24 * 3600) {
     console.warn(
       `[stamp] batch TTL below 30d (${Math.round(ttl / 86400)}d) — top up soon`,
+    );
+  }
+
+  console.log(
+    `[publish+extract] done in ${Math.round((Date.now() - startedAt) / 1000)}s — crawling next`,
+  );
+
+  // Crawl AFTER publishing: freshness of what we have beats breadth of
+  // what we might get. Newly seeded repos enter the next snapshot.
+  const candidates = gossip
+    .map((repo) => repo.rid)
+    .filter((rid) => !stored.has(rid));
+  const fetched = await fetchNewRepos(
+    config.radBin,
+    config.radHome,
+    candidates,
+    state,
+    {
+      limit: config.fetchPerCycle,
+      diskFloorGb: config.diskFloorGb,
+      budgetMs: config.fetchBudgetMinutes * 60 * 1000,
+    },
+  );
+  await saveState(config.stateFile, state);
+  if (fetched.fetched.length) {
+    console.log(
+      `[fetch] seeded ${fetched.fetched.length} new repos for the next snapshot`,
     );
   }
 

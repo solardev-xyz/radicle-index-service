@@ -59,8 +59,9 @@ export async function fetchNewRepos(
   {
     limit,
     diskFloorGb,
+    budgetMs = Infinity,
     now = Date.now(),
-  }: { limit: number; diskFloorGb: number; now?: number },
+  }: { limit: number; diskFloorGb: number; budgetMs?: number; now?: number },
 ): Promise<FetchResult> {
   const result: FetchResult = {
     fetched: [],
@@ -68,9 +69,14 @@ export async function fetchNewRepos(
     skippedDiskFloor: false,
   };
   if (limit <= 0) return result;
+  const deadline = Date.now() + budgetMs;
 
   for (const rid of candidates) {
     if (result.fetched.length >= limit) break;
+    if (Date.now() > deadline) {
+      console.log("[fetch] time budget exhausted — continuing next cycle");
+      break;
+    }
 
     const failure = state.failed[rid];
     if (failure && failure.nextTryAt > now) continue;
@@ -87,7 +93,7 @@ export async function fetchNewRepos(
       console.log(`[fetch] seeding ${rid}`);
       await execFileAsync(radBin, ["seed", rid, "--scope", "all"], {
         env: { ...process.env, RAD_HOME: radHome, RAD_PASSPHRASE: "" },
-        timeout: 120_000,
+        timeout: 45_000,
       });
       result.fetched.push(rid);
       delete state.failed[rid];
