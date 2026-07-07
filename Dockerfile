@@ -33,7 +33,8 @@ ENV RAD_HOME=/data/radicle \
     RAD_PASSPHRASE= \
     RADICLE_HTTPD_URL=http://127.0.0.1:8780 \
     OUT_DIR=/data/out \
-    STATE_FILE=/data/state.json
+    STATE_FILE=/data/state.json \
+    CACHE_FILE=/data/records.json
 
 VOLUME /data
 
