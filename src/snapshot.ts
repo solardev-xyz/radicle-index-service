@@ -7,12 +7,12 @@
  * shard list so future sharding is a additive change for readers.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { Wallet } from 'ethers';
-import type { RepoRecord, UserRecord } from './extract.ts';
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Wallet } from "ethers";
+import type { RepoRecord, UserRecord } from "./extract.ts";
 
-export const SCHEMA = 'radicle-index/1';
+export const SCHEMA = "radicle-index/1";
 
 export interface IndexManifest {
   schema: typeof SCHEMA;
@@ -39,12 +39,12 @@ export interface IndexManifest {
 
 /** Canonical bytes for signing: the manifest JSON with `sig` emptied. */
 export function canonicalManifestForSigning(manifest: IndexManifest): string {
-  return JSON.stringify({ ...manifest, sig: '' });
+  return JSON.stringify({ ...manifest, sig: "" });
 }
 
 export async function signManifest(
   manifest: IndexManifest,
-  signerKey: string
+  signerKey: string,
 ): Promise<IndexManifest> {
   const wallet = new Wallet(signerKey);
   const sig = await wallet.signMessage(canonicalManifestForSigning(manifest));
@@ -61,12 +61,17 @@ export interface SnapshotInput {
 }
 
 /** Write the snapshot artifacts to outDir; returns the unsigned manifest. */
-export async function writeSnapshot(outDir: string, input: SnapshotInput): Promise<IndexManifest> {
+export async function writeSnapshot(
+  outDir: string,
+  input: SnapshotInput,
+): Promise<IndexManifest> {
   await mkdir(outDir, { recursive: true });
 
-  const repos = [...input.repos].sort((a, b) => b.lastActivity - a.lastActivity);
-  await writeFile(join(outDir, 'repos.json'), JSON.stringify(repos));
-  await writeFile(join(outDir, 'users.json'), JSON.stringify(input.users));
+  const repos = [...input.repos].sort(
+    (a, b) => b.lastActivity - a.lastActivity,
+  );
+  await writeFile(join(outDir, "repos.json"), JSON.stringify(repos));
+  await writeFile(join(outDir, "users.json"), JSON.stringify(input.users));
 
   const manifest: IndexManifest = {
     schema: SCHEMA,
@@ -77,13 +82,19 @@ export async function writeSnapshot(outDir: string, input: SnapshotInput): Promi
       indexedRepos: repos.length,
       users: input.users.length,
     },
-    shards: { repos: ['repos.json'], users: ['users.json'] },
-    sig: '',
+    shards: { repos: ["repos.json"], users: ["users.json"] },
+    sig: "",
   };
   return manifest;
 }
 
 /** Persist the (signed) manifest alongside the shards. */
-export async function writeManifest(outDir: string, manifest: IndexManifest): Promise<void> {
-  await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+export async function writeManifest(
+  outDir: string,
+  manifest: IndexManifest,
+): Promise<void> {
+  await writeFile(
+    join(outDir, "manifest.json"),
+    JSON.stringify(manifest, null, 2),
+  );
 }

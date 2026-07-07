@@ -27,21 +27,27 @@ export interface Config {
   outDir: string;
   /** Where crawl state (failed RIDs, backoff) persists. */
   stateFile: string;
+  /** Extracted-record cache for incremental cycles. */
+  cacheFile: string;
+  /** Force a full re-extraction after this many hours (safety net). */
+  fullSweepHours: number;
 }
 
 export function loadConfig(env = process.env): Config {
   const radHome = env.RAD_HOME ?? `${env.HOME}/.radicle`;
   return {
     radHome,
-    httpdUrl: env.RADICLE_HTTPD_URL ?? 'http://127.0.0.1:8780',
-    radBin: env.RAD_BIN ?? 'rad',
-    beeUrl: env.BEE_API_URL ?? 'http://127.0.0.1:1633',
+    httpdUrl: env.RADICLE_HTTPD_URL ?? "http://127.0.0.1:8780",
+    radBin: env.RAD_BIN ?? "rad",
+    beeUrl: env.BEE_API_URL ?? "http://127.0.0.1:1633",
     signerKey: env.FEED_SIGNER_KEY ?? null,
     batchId: env.STAMP_BATCH_ID ?? null,
     fetchPerCycle: Number(env.FETCH_PER_CYCLE ?? 25),
     diskFloorGb: Number(env.DISK_FLOOR_GB ?? 10),
     intervalMinutes: Number(env.INTERVAL_MINUTES ?? 60),
-    outDir: env.OUT_DIR ?? './out',
-    stateFile: env.STATE_FILE ?? './out/state.json',
+    outDir: env.OUT_DIR ?? "./out",
+    stateFile: env.STATE_FILE ?? "./out/state.json",
+    cacheFile: env.CACHE_FILE ?? "./out/records.json",
+    fullSweepHours: Number(env.FULL_SWEEP_HOURS ?? 24),
   };
 }

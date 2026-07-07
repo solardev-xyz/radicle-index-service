@@ -4,28 +4,33 @@
  * (unreachable repos are common — seeders may simply be offline).
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { statfs } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { statfs } from "node:fs/promises";
+import { dirname } from "node:path";
 
 const execFileAsync = promisify(execFile);
 
 export interface CrawlState {
   /** rid → { failures, nextTryAt } */
   failed: Record<string, { failures: number; nextTryAt: number }>;
+  /** sha256 over the shard bytes of the last published snapshot. */
+  lastPublishedHash?: string;
 }
 
 export async function loadState(stateFile: string): Promise<CrawlState> {
   try {
-    return JSON.parse(await readFile(stateFile, 'utf8')) as CrawlState;
+    return JSON.parse(await readFile(stateFile, "utf8")) as CrawlState;
   } catch {
     return { failed: {} };
   }
 }
 
-export async function saveState(stateFile: string, state: CrawlState): Promise<void> {
+export async function saveState(
+  stateFile: string,
+  state: CrawlState,
+): Promise<void> {
   await mkdir(dirname(stateFile), { recursive: true });
   await writeFile(stateFile, JSON.stringify(state));
 }
@@ -51,9 +56,17 @@ export async function fetchNewRepos(
   radHome: string,
   candidates: string[],
   state: CrawlState,
-  { limit, diskFloorGb, now = Date.now() }: { limit: number; diskFloorGb: number; now?: number }
+  {
+    limit,
+    diskFloorGb,
+    now = Date.now(),
+  }: { limit: number; diskFloorGb: number; now?: number },
 ): Promise<FetchResult> {
-  const result: FetchResult = { fetched: [], failed: [], skippedDiskFloor: false };
+  const result: FetchResult = {
+    fetched: [],
+    failed: [],
+    skippedDiskFloor: false,
+  };
   if (limit <= 0) return result;
 
   for (const rid of candidates) {
@@ -63,25 +76,32 @@ export async function fetchNewRepos(
     if (failure && failure.nextTryAt > now) continue;
 
     if ((await freeDiskGb(radHome)) < diskFloorGb) {
-      console.warn(`[fetch] disk floor reached (<${diskFloorGb} GB free) — pausing crawl`);
+      console.warn(
+        `[fetch] disk floor reached (<${diskFloorGb} GB free) — pausing crawl`,
+      );
       result.skippedDiskFloor = true;
       break;
     }
 
     try {
       console.log(`[fetch] seeding ${rid}`);
-      await execFileAsync(radBin, ['seed', rid, '--scope', 'all'], {
-        env: { ...process.env, RAD_HOME: radHome, RAD_PASSPHRASE: '' },
+      await execFileAsync(radBin, ["seed", rid, "--scope", "all"], {
+        env: { ...process.env, RAD_HOME: radHome, RAD_PASSPHRASE: "" },
         timeout: 120_000,
       });
       result.fetched.push(rid);
       delete state.failed[rid];
     } catch (err) {
       const failures = (failure?.failures ?? 0) + 1;
-      const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), 7 * 24 * 3600 * 1000);
+      const backoff = Math.min(
+        BACKOFF_BASE_MS * 2 ** (failures - 1),
+        7 * 24 * 3600 * 1000,
+      );
       state.failed[rid] = { failures, nextTryAt: now + backoff };
       result.failed.push(rid);
-      console.warn(`[fetch] ${rid} failed (${failures}x): ${(err as Error).message?.split('\n')[0]}`);
+      console.warn(
+        `[fetch] ${rid} failed (${failures}x): ${(err as Error).message?.split("\n")[0]}`,
+      );
     }
   }
   return result;

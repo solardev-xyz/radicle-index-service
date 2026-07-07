@@ -5,11 +5,11 @@
  * (bzz://<feedManifest>/manifest.json resolves to the newest snapshot).
  */
 
-import { Bee, PrivateKey, Topic } from '@ethersphere/bee-js';
-import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { Bee, PrivateKey, Topic } from "@ethersphere/bee-js";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 
-export const FEED_TOPIC = 'radicle-index/v1';
+export const FEED_TOPIC = "radicle-index/v1";
 
 export interface SwarmPublisher {
   owner: string;
@@ -25,7 +25,7 @@ export interface SwarmPublisher {
 
 function toHex(value: unknown): string {
   const maybe = value as { toHex?: () => string };
-  return typeof maybe?.toHex === 'function' ? maybe.toHex() : String(value);
+  return typeof maybe?.toHex === "function" ? maybe.toHex() : String(value);
 }
 
 async function selectBatch(bee: Bee): Promise<string | null> {
@@ -35,7 +35,7 @@ async function selectBatch(bee: Bee): Promise<string | null> {
   for (const batch of batches) {
     if (!batch.usable) continue;
     const ttl =
-      batch.duration && typeof batch.duration.toSeconds === 'function'
+      batch.duration && typeof batch.duration.toSeconds === "function"
         ? batch.duration.toSeconds()
         : 0;
     if (ttl > bestTtl) {
@@ -49,7 +49,7 @@ async function selectBatch(bee: Bee): Promise<string | null> {
 export async function createPublisher(
   beeUrl: string,
   signerKey: string,
-  configuredBatch: string | null
+  configuredBatch: string | null,
 ): Promise<SwarmPublisher> {
   const bee = new Bee(beeUrl);
   const signer = new PrivateKey(signerKey);
@@ -59,7 +59,9 @@ export async function createPublisher(
 
   const batchId = configuredBatch ?? (await selectBatch(bee));
   if (!batchId) {
-    throw new Error('No usable postage batch on the bee node — buy one (mutable!) first.');
+    throw new Error(
+      "No usable postage batch on the bee node — buy one (mutable!) first.",
+    );
   }
 
   return {
@@ -75,11 +77,11 @@ export async function createPublisher(
       const files = await Promise.all(
         names.map(async (name) => {
           const data = await readFile(join(dir, name));
-          return new File([data], name, { type: 'application/json' });
-        })
+          return new File([data], name, { type: "application/json" });
+        }),
       );
       const result = await bee.uploadFiles(batchId, files, {
-        indexDocument: 'manifest.json',
+        indexDocument: "manifest.json",
         pin: true,
       });
       return toHex(result.reference);
@@ -92,7 +94,7 @@ export async function createPublisher(
     async batchTtl() {
       try {
         const batch = await bee.getPostageBatch(batchId);
-        return batch.duration && typeof batch.duration.toSeconds === 'function'
+        return batch.duration && typeof batch.duration.toSeconds === "function"
           ? batch.duration.toSeconds()
           : null;
       } catch {

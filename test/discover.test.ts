@@ -1,15 +1,15 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { discoverFromGossip, discoverAliases } from '../src/discover.ts';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { discoverFromGossip, discoverAliases } from "../src/discover.ts";
 
 function makeRadHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'radhome-'));
-  mkdirSync(join(home, 'node'), { recursive: true });
-  const db = new DatabaseSync(join(home, 'node', 'node.db'));
+  const home = mkdtempSync(join(tmpdir(), "radhome-"));
+  mkdirSync(join(home, "node"), { recursive: true });
+  const db = new DatabaseSync(join(home, "node", "node.db"));
   db.exec(`
     CREATE TABLE routing (repo TEXT, node TEXT);
     CREATE TABLE nodes (id TEXT, alias TEXT);
@@ -24,15 +24,15 @@ function makeRadHome(): string {
   return home;
 }
 
-test('discoverFromGossip counts seeders, filters invalid RIDs, sorts desc', () => {
+test("discoverFromGossip counts seeders, filters invalid RIDs, sorts desc", () => {
   const repos = discoverFromGossip(makeRadHome());
   assert.deepEqual(repos, [
-    { rid: 'rad:z3gqcJUoA1n9HaHKufZs5FCSGazv5', seeders: 2 },
-    { rid: 'rad:z4V1sjrXqjvFdnCUbxPFqd5p4DtH5', seeders: 1 },
+    { rid: "rad:z3gqcJUoA1n9HaHKufZs5FCSGazv5", seeders: 2 },
+    { rid: "rad:z4V1sjrXqjvFdnCUbxPFqd5p4DtH5", seeders: 1 },
   ]);
 });
 
-test('discoverAliases skips empty and null aliases', () => {
+test("discoverAliases skips empty and null aliases", () => {
   const aliases = discoverAliases(makeRadHome());
-  assert.deepEqual([...aliases.entries()], [['z6MkA', 'alice']]);
+  assert.deepEqual([...aliases.entries()], [["z6MkA", "alice"]]);
 });
