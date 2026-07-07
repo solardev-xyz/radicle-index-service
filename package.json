@@ -1,0 +1,20 @@
+{
+  "name": "radicle-index-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Indexes the Radicle network from a local node's view and publishes a signed, user-selectable index to Swarm",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "once": "node --experimental-strip-types src/index.ts --once",
+    "dry": "node --experimental-strip-types src/index.ts --once --dry-run",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ethersphere/bee-js": "^9.1.2",
+    "ethers": "^6.16.0"
+  }
+}
