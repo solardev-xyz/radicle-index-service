@@ -33,6 +33,11 @@ export interface Config {
   cacheFile: string;
   /** Force a full re-extraction after this many hours (safety net). */
   fullSweepHours: number;
+  /** Remove repos from node storage once their records are cached. */
+  evictAfterExtract: boolean;
+  /** Re-fetch an evicted repo when its record is older than this many days
+   * (safety net for refs announcements the node pruned or missed). */
+  refreshDays: number;
 }
 
 export function loadConfig(env = process.env): Config {
@@ -52,5 +57,7 @@ export function loadConfig(env = process.env): Config {
     stateFile: env.STATE_FILE ?? "./out/state.json",
     cacheFile: env.CACHE_FILE ?? "./out/records.json",
     fullSweepHours: Number(env.FULL_SWEEP_HOURS ?? 24),
+    evictAfterExtract: env.EVICT_AFTER_EXTRACT !== "false",
+    refreshDays: Number(env.REFRESH_DAYS ?? 7),
   };
 }

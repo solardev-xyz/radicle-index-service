@@ -15,17 +15,22 @@ Each cycle:
 1. **Discover** — RID inventory from the local radicle-node's gossip
    routing table (thousands of repos learned passively), aliases from node
    announcements.
-2. **Crawl** — seed not-yet-stored repos (most-seeded first), bounded per
-   cycle (`FETCH_PER_CYCLE`) and by a disk floor (`DISK_FLOOR_GB`);
-   unreachable repos back off exponentially.
-3. **Extract** — repo metadata + issue/patch counts + per-DID contribution
-   tallies from the local radicle-httpd.
-4. **Publish** — write shards + EIP-191-signed manifest, upload as a Swarm
+2. **Extract** — repo metadata + issue/patch counts + per-DID contribution
+   tallies from the local radicle-httpd. Incremental: repos re-extract only
+   when gossip announces newer refs; everything else comes from the record
+   cache — including repos already evicted from storage.
+3. **Publish** — write shards + EIP-191-signed manifest, upload as a Swarm
    collection, point the `radicle-index/v1` feed at it. Clients fetch
    `bzz://<feedManifest>/manifest.json`.
-
-The indexer node doubles as a public Radicle seed node — it serves
-everything it indexes.
+4. **Evict** — remove extracted repos from node storage (`rad unseed` +
+   delete). Storage is a working set, not an archive: a repo only needs to
+   be on disk long enough to index it, and its record survives in the
+   cache until the network forgets the repo. Kill switch:
+   `EVICT_AFTER_EXTRACT=false`.
+5. **Crawl** — fetch repos whose refs moved since extraction, then
+   never-indexed repos (most-seeded first), then records older than
+   `REFRESH_DAYS`; bounded per cycle (`FETCH_PER_CYCLE`) and by a disk
+   floor (`DISK_FLOOR_GB`); unreachable repos back off exponentially.
 
 ## Run locally
 

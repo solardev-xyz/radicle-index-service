@@ -4,13 +4,12 @@
  * (unreachable repos are common — seeders may simply be offline).
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { statfs } from "node:fs/promises";
 import { dirname } from "node:path";
-
-const execFileAsync = promisify(execFile);
+import type { RecordCache } from "./cache.ts";
+import type { NetworkRepo } from "./discover.ts";
+import { execRad } from "./rad.ts";
 
 export interface CrawlState {
   /** rid → { failures, nextTryAt } */
@@ -38,6 +37,36 @@ export async function saveState(
 export async function freeDiskGb(path: string): Promise<number> {
   const stats = await statfs(path);
   return (stats.bavail * stats.bsize) / 1e9;
+}
+
+/**
+ * The crawl queue, in priority order (freshness beats breadth):
+ *  1. evicted repos whose refs moved since extraction — their index
+ *     records are stale;
+ *  2. never-indexed repos — breadth;
+ *  3. evicted repos whose record outlived the refresh window — safety net
+ *     for announcements the node pruned or missed.
+ * Gossip order (most-seeded first) is preserved within each group.
+ */
+export function selectFetchCandidates(
+  gossip: NetworkRepo[],
+  stored: Set<string>,
+  cache: RecordCache,
+  announcements: Map<string, number>,
+  now: number,
+  refreshMs: number,
+): string[] {
+  const stale: string[] = [];
+  const fresh: string[] = [];
+  const expired: string[] = [];
+  for (const { rid } of gossip) {
+    if (stored.has(rid)) continue;
+    const cached = cache[rid];
+    if (!cached) fresh.push(rid);
+    else if ((announcements.get(rid) ?? 0) > cached.announceTs) stale.push(rid);
+    else if (now - cached.extractedAt >= refreshMs) expired.push(rid);
+  }
+  return [...stale, ...fresh, ...expired];
 }
 
 const BACKOFF_BASE_MS = 60 * 60 * 1000; // 1h, doubling per failure, capped at a week
@@ -91,10 +120,7 @@ export async function fetchNewRepos(
 
     try {
       console.log(`[fetch] seeding ${rid}`);
-      await execFileAsync(radBin, ["seed", rid, "--scope", "all"], {
-        env: { ...process.env, RAD_HOME: radHome, RAD_PASSPHRASE: "" },
-        timeout: 45_000,
-      });
+      await execRad(radBin, radHome, ["seed", rid, "--scope", "all"], 45_000);
       result.fetched.push(rid);
       delete state.failed[rid];
     } catch (err) {

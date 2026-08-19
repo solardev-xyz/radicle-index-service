@@ -58,6 +58,31 @@ export function fromScan(
 }
 
 /**
+ * Index records for repos no longer stored locally (evicted after
+ * extraction). A cached record stays in the index while gossip still knows
+ * the repo; records for repos gone from the network are deleted from the
+ * cache in place.
+ */
+export function foldEvictedRecords(
+  cache: RecordCache,
+  stored: Set<string>,
+  gossipKnown: { has(rid: string): boolean },
+): { scans: RepoScan[]; pruned: number } {
+  const scans: RepoScan[] = [];
+  let pruned = 0;
+  for (const [rid, cached] of Object.entries(cache)) {
+    if (stored.has(rid)) continue;
+    if (gossipKnown.has(rid)) {
+      scans.push(toScan(cached));
+    } else {
+      delete cache[rid];
+      pruned++;
+    }
+  }
+  return { scans, pruned };
+}
+
+/**
  * Reuse the cached scan when gossip hasn't announced newer refs and the
  * full-sweep deadline hasn't passed.
  */

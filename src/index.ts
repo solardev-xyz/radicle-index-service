@@ -1,8 +1,10 @@
 /**
  * radicle-index-service — daemon entry point.
  *
- * Cycle: discover (gossip + stored) → fetch new repos (bounded) → extract
- * all stored repos → snapshot → sign → upload to Swarm → update feed.
+ * Cycle: discover (gossip + stored) → extract stored repos (incremental,
+ * evicted repos come from the record cache) → snapshot → sign → upload to
+ * Swarm → update feed → evict extracted repos from storage → fetch
+ * stale/new repos (bounded).
  *
  * Flags: --once (single cycle), --dry-run (build snapshot, skip Swarm).
  */
@@ -18,14 +20,21 @@ import {
   discoverRefsAnnouncements,
 } from "./discover.ts";
 import { extractRepo, buildUsers, type RepoScan } from "./extract.ts";
-import { fetchNewRepos, loadState, saveState } from "./fetch.ts";
+import {
+  fetchNewRepos,
+  loadState,
+  saveState,
+  selectFetchCandidates,
+} from "./fetch.ts";
 import {
   loadRecordCache,
   saveRecordCache,
   canReuse,
   toScan,
   fromScan,
+  foldEvictedRecords,
 } from "./cache.ts";
+import { evictRepos, pruneTmpDirs } from "./evict.ts";
 import { writeSnapshot, writeManifest, signManifest } from "./snapshot.ts";
 import { createPublisher, FEED_TOPIC } from "./swarm.ts";
 import { Wallet } from "ethers";
@@ -58,12 +67,16 @@ async function cycle(): Promise<void> {
   const fullSweepMs = config.fullSweepHours * 3600 * 1000;
   const now = Date.now();
   const scans: RepoScan[] = [];
+  // Stored repos whose record made it into this snapshot — the only ones
+  // that may safely leave storage afterwards.
+  const snapshottedStored: string[] = [];
   let reused = 0;
   for (const rid of stored) {
     const announceTs = announcements.get(rid) ?? 0;
     const cached = cache[rid];
     if (canReuse(cached, announceTs, now, fullSweepMs)) {
       scans.push(toScan(cached));
+      snapshottedStored.push(rid);
       reused++;
       continue;
     }
@@ -75,13 +88,23 @@ async function cycle(): Promise<void> {
       );
       cache[rid] = fromScan(scan, announceTs, now);
       scans.push(scan);
+      snapshottedStored.push(rid);
     } catch (err) {
       console.warn(`[extract] ${rid}: ${(err as Error).message}`);
     }
   }
+  const extracted = scans.length - reused;
+
+  // Repos evicted from storage after earlier extractions stay in the index
+  // via their cached records, as long as gossip still knows them.
+  const evictedRecords = foldEvictedRecords(cache, stored, seederCounts);
+  scans.push(...evictedRecords.scans);
   await saveRecordCache(config.cacheFile, cache);
   console.log(
-    `[extract] ${scans.length}/${stored.size} repos (${scans.length - reused} extracted, ${reused} from cache)`,
+    `[extract] ${stored.size} stored (${extracted} extracted, ${reused} from cache) + ${evictedRecords.scans.length} evicted records` +
+      (evictedRecords.pruned
+        ? `; pruned ${evictedRecords.pruned} gone from gossip`
+        : ""),
   );
 
   // Seeder counts change without refs moving — refresh them on cached
@@ -130,42 +153,66 @@ async function cycle(): Promise<void> {
   const contentHash = shardHash.digest("hex");
   if (contentHash === state.lastPublishedHash) {
     console.log("[publish] shards unchanged since last publish — skipping");
-    return;
-  }
-
-  // Publish.
-  const publisher = await createPublisher(
-    config.beeUrl,
-    config.signerKey,
-    config.batchId,
-  );
-  const snapshotRef = await publisher.uploadSnapshot(config.outDir);
-  await publisher.updateFeed(snapshotRef);
-  const feedManifest = await publisher.feedManifest();
-  console.log(`[publish] snapshot bzz://${snapshotRef}`);
-  console.log(
-    `[publish] feed    bzz://${feedManifest} (topic "${FEED_TOPIC}", owner ${publisher.owner})`,
-  );
-
-  state.lastPublishedHash = contentHash;
-  await saveState(config.stateFile, state);
-
-  const ttl = await publisher.batchTtl();
-  if (ttl !== null && ttl < 30 * 24 * 3600) {
-    console.warn(
-      `[stamp] batch TTL below 30d (${Math.round(ttl / 86400)}d) — top up soon`,
+  } else {
+    const publisher = await createPublisher(
+      config.beeUrl,
+      config.signerKey,
+      config.batchId,
     );
+    const snapshotRef = await publisher.uploadSnapshot(config.outDir);
+    await publisher.updateFeed(snapshotRef);
+    const feedManifest = await publisher.feedManifest();
+    console.log(`[publish] snapshot bzz://${snapshotRef}`);
+    console.log(
+      `[publish] feed    bzz://${feedManifest} (topic "${FEED_TOPIC}", owner ${publisher.owner})`,
+    );
+
+    state.lastPublishedHash = contentHash;
+    await saveState(config.stateFile, state);
+
+    const ttl = await publisher.batchTtl();
+    if (ttl !== null && ttl < 30 * 24 * 3600) {
+      console.warn(
+        `[stamp] batch TTL below 30d (${Math.round(ttl / 86400)}d) — top up soon`,
+      );
+    }
   }
 
   console.log(
-    `[publish+extract] done in ${Math.round((Date.now() - startedAt) / 1000)}s — crawling next`,
+    `[publish+extract] done in ${Math.round((Date.now() - startedAt) / 1000)}s — evicting + crawling next`,
   );
+
+  // Evict AFTER publishing: storage is only a working set, and freeing it
+  // now makes room for the crawl. Only repos whose records are safely
+  // cached are removed; failures stay stored and retry next cycle.
+  if (config.evictAfterExtract) {
+    if (snapshottedStored.length) {
+      const evicted = await evictRepos(
+        config.radBin,
+        config.radHome,
+        snapshottedStored,
+      );
+      console.log(
+        `[evict] removed ${evicted.evicted.length} repos from storage` +
+          (evicted.failed.length ? `, ${evicted.failed.length} failed` : ""),
+      );
+    }
+    const tmp = await pruneTmpDirs(config.radHome);
+    if (tmp.length) {
+      console.log(`[evict] pruned ${tmp.length} stale .tmp fetch leftovers`);
+    }
+  }
 
   // Crawl AFTER publishing: freshness of what we have beats breadth of
   // what we might get. Newly seeded repos enter the next snapshot.
-  const candidates = gossip
-    .map((repo) => repo.rid)
-    .filter((rid) => !stored.has(rid));
+  const candidates = selectFetchCandidates(
+    gossip,
+    stored,
+    cache,
+    announcements,
+    now,
+    config.refreshDays * 24 * 3600 * 1000,
+  );
   const fetched = await fetchNewRepos(
     config.radBin,
     config.radHome,
