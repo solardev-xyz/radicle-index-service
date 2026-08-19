@@ -25,8 +25,9 @@ Each cycle:
 4. **Evict** — remove extracted repos from node storage (`rad unseed` +
    delete). Storage is a working set, not an archive: a repo only needs to
    be on disk long enough to index it, and its record survives in the
-   cache until the network forgets the repo. Kill switch:
-   `EVICT_AFTER_EXTRACT=false`.
+   cache until the network forgets the repo. Bounded (`EVICT_PER_CYCLE`,
+   default 300) and paced — an unbounded backlog delete can starve the
+   whole host. Kill switch: `EVICT_AFTER_EXTRACT=false`.
 5. **Crawl** — fetch repos whose refs moved since extraction, then
    never-indexed repos (most-seeded first), then records older than
    `REFRESH_DAYS`; bounded per cycle (`FETCH_PER_CYCLE`) and by a disk
