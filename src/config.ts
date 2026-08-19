@@ -35,6 +35,9 @@ export interface Config {
   fullSweepHours: number;
   /** Remove repos from node storage once their records are cached. */
   evictAfterExtract: boolean;
+  /** Max repos to evict per cycle — bounds the I/O of deleting a large
+   * backlog (a mass delete can starve the whole host). */
+  evictPerCycle: number;
   /** Re-fetch an evicted repo when its record is older than this many days
    * (safety net for refs announcements the node pruned or missed). */
   refreshDays: number;
@@ -58,6 +61,7 @@ export function loadConfig(env = process.env): Config {
     cacheFile: env.CACHE_FILE ?? "./out/records.json",
     fullSweepHours: Number(env.FULL_SWEEP_HOURS ?? 24),
     evictAfterExtract: env.EVICT_AFTER_EXTRACT !== "false",
+    evictPerCycle: Number(env.EVICT_PER_CYCLE ?? 300),
     refreshDays: Number(env.REFRESH_DAYS ?? 7),
   };
 }

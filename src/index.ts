@@ -186,15 +186,17 @@ async function cycle(): Promise<void> {
   // now makes room for the crawl. Only repos whose records are safely
   // cached are removed; failures stay stored and retry next cycle.
   if (config.evictAfterExtract) {
-    if (snapshottedStored.length) {
-      const evicted = await evictRepos(
-        config.radBin,
-        config.radHome,
-        snapshottedStored,
-      );
+    // Bounded per cycle: a large backlog (first rollout, or after downtime)
+    // is drained over several cycles instead of one host-starving delete.
+    const evictNow = snapshottedStored.slice(0, config.evictPerCycle);
+    if (evictNow.length) {
+      const evicted = await evictRepos(config.radBin, config.radHome, evictNow);
       console.log(
         `[evict] removed ${evicted.evicted.length} repos from storage` +
-          (evicted.failed.length ? `, ${evicted.failed.length} failed` : ""),
+          (evicted.failed.length ? `, ${evicted.failed.length} failed` : "") +
+          (snapshottedStored.length > evictNow.length
+            ? `; ${snapshottedStored.length - evictNow.length} deferred to next cycle`
+            : ""),
       );
     }
     const tmp = await pruneTmpDirs(config.radHome);

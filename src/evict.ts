@@ -16,6 +16,11 @@ import { execRad } from "./rad.ts";
  * (thousands of repos) to dozens of process spawns instead of one each. */
 const UNSEED_CHUNK = 100;
 
+/** Pause between chunks so a large eviction backlog doesn't monopolize the
+ * host's I/O — deleting tens of GB of git objects uninterrupted can starve
+ * every other process on the machine (observed: sshd unreachable). */
+const CHUNK_PAUSE_MS = 2000;
+
 export interface EvictResult {
   evicted: string[];
   failed: string[];
@@ -31,6 +36,7 @@ export async function evictRepos(
 ): Promise<EvictResult> {
   const result: EvictResult = { evicted: [], failed: [] };
   for (let i = 0; i < rids.length; i += UNSEED_CHUNK) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, CHUNK_PAUSE_MS));
     const chunk = rids.slice(i, i + UNSEED_CHUNK);
     let unseeded: string[];
     try {
