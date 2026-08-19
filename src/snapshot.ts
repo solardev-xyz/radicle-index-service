@@ -7,6 +7,7 @@
  * shard list so future sharding is a additive change for readers.
  */
 
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Wallet } from "ethers";
@@ -49,6 +50,26 @@ export async function signManifest(
   const wallet = new Wallet(signerKey);
   const sig = await wallet.signMessage(canonicalManifestForSigning(manifest));
   return { ...manifest, sig };
+}
+
+/**
+ * Hash of the snapshot content that matters: everything except seeder
+ * counts, which jitter every cycle. Gates publishing — without this the
+ * feed gains ~72 updates/day of pure seeder noise, churning the postage
+ * batch (each publish stamps the full shards) and growing the update
+ * chain the network has to keep resolvable.
+ */
+export function contentFingerprint(
+  repos: RepoRecord[],
+  users: UserRecord[],
+): string {
+  const hash = createHash("sha256");
+  const stable = [...repos]
+    .sort((a, b) => (a.rid < b.rid ? -1 : 1))
+    .map((repo) => ({ ...repo, seeders: 0 }));
+  hash.update(JSON.stringify(stable));
+  hash.update(JSON.stringify(users));
+  return hash.digest("hex");
 }
 
 export interface SnapshotInput {

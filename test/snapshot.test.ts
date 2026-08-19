@@ -11,7 +11,9 @@ import {
   signManifest,
   canonicalManifestForSigning,
   SCHEMA,
+  contentFingerprint,
 } from "../src/snapshot.ts";
+import { scanFor } from "./fixtures.ts";
 
 const KEY =
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -79,4 +81,28 @@ test("signManifest produces a verifiable EIP-191 signature", async () => {
   await writeManifest(dir, signed);
   const onDisk = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8"));
   assert.equal(onDisk.sig, signed.sig);
+});
+
+test("contentFingerprint ignores seeder jitter, sees real changes", () => {
+  const base = scanFor("rad:zA").record;
+  const users = [
+    { did: "did:key:zA", alias: null, maintains: [], issues: 1, patches: 0 },
+  ];
+  const a = contentFingerprint([base], users);
+  const jitter = contentFingerprint([{ ...base, seeders: 42 }], users);
+  assert.equal(a, jitter); // seeders alone never trigger a publish
+  const changed = contentFingerprint(
+    [{ ...base, issues: { open: 1, closed: 0 } }],
+    users,
+  );
+  assert.notEqual(a, changed);
+  const reordered = contentFingerprint(
+    [scanFor("rad:zB").record, base],
+    users,
+  );
+  const reordered2 = contentFingerprint(
+    [base, scanFor("rad:zB").record],
+    users,
+  );
+  assert.equal(reordered, reordered2); // record order is canonicalized
 });

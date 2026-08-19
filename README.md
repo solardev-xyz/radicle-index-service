@@ -21,7 +21,16 @@ Each cycle:
    cache — including repos already evicted from storage.
 3. **Publish** — write shards + EIP-191-signed manifest, upload as a Swarm
    collection, point the `radicle-index/v1` feed at it. Clients fetch
-   `bzz://<feedManifest>/manifest.json`.
+   `bzz://<feedManifest>/manifest.json`. Only when the content changed
+   beyond seeder-count jitter, or every `SEEDER_REFRESH_HOURS` — each
+   publish appends a feed update and stamps the full shards, so publishing
+   on jitter churns the postage batch ~72×/day for nothing. Every
+   `HEAL_INTERVAL_HOURS` the whole feed update chain is re-signed and
+   re-stamped: feed resolution walks the chain from index 0, the mutable
+   batch evicts its oldest stamps under churn, and the network
+   garbage-collects chunks with dead stamps — un-healed, the feed
+   eventually resolves only on the publishing node (observed 2026-08-19:
+   292 of 2428 chain chunks gone, feed 404 everywhere else).
 4. **Evict** — remove extracted repos from node storage (`rad unseed` +
    delete). Storage is a working set, not an archive: a repo only needs to
    be on disk long enough to index it, and its record survives in the

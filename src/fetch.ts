@@ -14,8 +14,14 @@ import { execRad } from "./rad.ts";
 export interface CrawlState {
   /** rid → { failures, nextTryAt } */
   failed: Record<string, { failures: number; nextTryAt: number }>;
-  /** sha256 over the shard bytes of the last published snapshot. */
+  /** contentFingerprint of the last published snapshot (seeders excluded). */
   lastPublishedHash?: string;
+  /** Unix ms of the last publish — drives the seeder-refresh republish. */
+  lastPublishedAt?: number;
+  /** Swarm reference of the last published snapshot (chain-heal target). */
+  lastSnapshotRef?: string;
+  /** Unix ms of the last full chain re-stamp. */
+  lastHealAt?: number;
 }
 
 export async function loadState(stateFile: string): Promise<CrawlState> {

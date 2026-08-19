@@ -5,7 +5,7 @@
  * (bzz://<feedManifest>/manifest.json resolves to the newest snapshot).
  */
 
-import { Bee, PrivateKey, Topic } from "@ethersphere/bee-js";
+import { Bee, FeedIndex, PrivateKey, Topic } from "@ethersphere/bee-js";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -19,6 +19,14 @@ export interface SwarmPublisher {
   uploadSnapshot(dir: string): Promise<string>;
   /** Point the feed at a new snapshot reference. */
   updateFeed(snapshotRef: string): Promise<void>;
+  /**
+   * Re-sign and re-stamp every index of the feed's update chain, pointing
+   * them all at snapshotRef. Feed resolution walks the chain from index 0,
+   * and the mutable batch evicts its oldest stamps under churn — without
+   * periodic re-stamping the network garbage-collects old chain chunks and
+   * the feed stops resolving anywhere but on this node.
+   */
+  healChain(snapshotRef: string): Promise<{ head: number; failed: number }>;
   /** TTL of the batch in seconds, or null when unknown. */
   batchTtl(): Promise<number | null>;
 }
@@ -89,6 +97,29 @@ export async function createPublisher(
 
     async updateFeed(snapshotRef: string) {
       await writer.uploadReference(batchId, snapshotRef);
+    },
+
+    async healChain(snapshotRef: string) {
+      const latest = await bee.fetchLatestFeedUpdate(topic, owner);
+      const head = Number(latest.feedIndex.toBigInt());
+      const queue = Array.from({ length: head + 1 }, (_, i) => i);
+      let failed = 0;
+      await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          while (queue.length) {
+            const i = queue.shift()!;
+            try {
+              await writer.uploadReference(batchId, snapshotRef, {
+                index: FeedIndex.fromBigInt(BigInt(i)),
+                pin: true,
+              });
+            } catch {
+              failed++;
+            }
+          }
+        }),
+      );
+      return { head, failed };
     },
 
     async batchTtl() {

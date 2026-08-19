@@ -41,6 +41,14 @@ export interface Config {
   /** Re-fetch an evicted repo when its record is older than this many days
    * (safety net for refs announcements the node pruned or missed). */
   refreshDays: number;
+  /** Publish anyway (refreshing seeder counts) when the last publish is
+   * older than this many hours, even if nothing significant changed. */
+  seederRefreshHours: number;
+  /** Re-stamp the feed's full update chain this often (0 = never). The
+   * mutable batch evicts its oldest stamps under churn, and the network
+   * garbage-collects chain chunks with dead stamps — which breaks feed
+   * resolution for everyone but this node. */
+  healIntervalHours: number;
 }
 
 export function loadConfig(env = process.env): Config {
@@ -62,6 +70,8 @@ export function loadConfig(env = process.env): Config {
     fullSweepHours: Number(env.FULL_SWEEP_HOURS ?? 24),
     evictAfterExtract: env.EVICT_AFTER_EXTRACT !== "false",
     evictPerCycle: Number(env.EVICT_PER_CYCLE ?? 300),
+    seederRefreshHours: Number(env.SEEDER_REFRESH_HOURS ?? 6),
+    healIntervalHours: Number(env.HEAL_INTERVAL_HOURS ?? 24),
     refreshDays: Number(env.REFRESH_DAYS ?? 7),
   };
 }

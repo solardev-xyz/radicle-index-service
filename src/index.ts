@@ -9,9 +9,6 @@
  * Flags: --once (single cycle), --dry-run (build snapshot, skip Swarm).
  */
 
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import {
   discoverFromGossip,
@@ -35,7 +32,12 @@ import {
   foldEvictedRecords,
 } from "./cache.ts";
 import { evictRepos, pruneTmpDirs } from "./evict.ts";
-import { writeSnapshot, writeManifest, signManifest } from "./snapshot.ts";
+import {
+  writeSnapshot,
+  writeManifest,
+  signManifest,
+  contentFingerprint,
+} from "./snapshot.ts";
 import { createPublisher, FEED_TOPIC } from "./swarm.ts";
 import { Wallet } from "ethers";
 
@@ -118,9 +120,10 @@ async function cycle(): Promise<void> {
   const signerAddress = config.signerKey
     ? new Wallet(config.signerKey).address
     : "0x" + "0".repeat(40);
+  const users = buildUsers(scans, aliases);
   let manifest = await writeSnapshot(config.outDir, {
     repos: scans.map((scan) => scan.record),
-    users: buildUsers(scans, aliases),
+    users,
     knownRepos: gossip.length,
     signer: signerAddress,
     indexerName: INDEXER_NAME,
@@ -144,30 +147,41 @@ async function cycle(): Promise<void> {
     );
   }
 
-  // Publish only when the shards actually changed (manifest excluded —
-  // its generatedAt moves every cycle by design).
-  const shardHash = createHash("sha256");
-  for (const shard of [...manifest.shards.repos, ...manifest.shards.users]) {
-    shardHash.update(await readFile(join(config.outDir, shard)));
-  }
-  const contentHash = shardHash.digest("hex");
-  if (contentHash === state.lastPublishedHash) {
-    console.log("[publish] shards unchanged since last publish — skipping");
-  } else {
-    const publisher = await createPublisher(
-      config.beeUrl,
-      config.signerKey,
-      config.batchId,
+  // Publish when the content meaningfully changed (seeder-count jitter is
+  // excluded — it flips every cycle and would turn the feed into ~72
+  // noise updates/day), or when the last publish is old enough that the
+  // seeder counts themselves deserve a refresh.
+  const fingerprint = contentFingerprint(
+    scans.map((scan) => scan.record),
+    users,
+  );
+  const changed = fingerprint !== state.lastPublishedHash;
+  const stale =
+    now - (state.lastPublishedAt ?? 0) >
+    config.seederRefreshHours * 3600 * 1000;
+  const publisher = await createPublisher(
+    config.beeUrl,
+    config.signerKey,
+    config.batchId,
+  );
+  if (!changed && !stale) {
+    console.log(
+      "[publish] nothing significant changed since last publish — skipping",
     );
+  } else {
     const snapshotRef = await publisher.uploadSnapshot(config.outDir);
     await publisher.updateFeed(snapshotRef);
     const feedManifest = await publisher.feedManifest();
-    console.log(`[publish] snapshot bzz://${snapshotRef}`);
+    console.log(
+      `[publish] snapshot bzz://${snapshotRef}${changed ? "" : " (seeder refresh)"}`,
+    );
     console.log(
       `[publish] feed    bzz://${feedManifest} (topic "${FEED_TOPIC}", owner ${publisher.owner})`,
     );
 
-    state.lastPublishedHash = contentHash;
+    state.lastPublishedHash = fingerprint;
+    state.lastPublishedAt = now;
+    state.lastSnapshotRef = snapshotRef;
     await saveState(config.stateFile, state);
 
     const ttl = await publisher.batchTtl();
@@ -176,6 +190,22 @@ async function cycle(): Promise<void> {
         `[stamp] batch TTL below 30d (${Math.round(ttl / 86400)}d) — top up soon`,
       );
     }
+  }
+
+  // Re-stamp the feed's update chain periodically so its history stays
+  // retrievable network-wide (see SwarmPublisher.healChain).
+  if (
+    config.healIntervalHours > 0 &&
+    state.lastSnapshotRef &&
+    now - (state.lastHealAt ?? 0) > config.healIntervalHours * 3600 * 1000
+  ) {
+    const healed = await publisher.healChain(state.lastSnapshotRef);
+    console.log(
+      `[heal] re-stamped feed chain 0..${healed.head}` +
+        (healed.failed ? ` (${healed.failed} failed)` : ""),
+    );
+    state.lastHealAt = now;
+    await saveState(config.stateFile, state);
   }
 
   console.log(
